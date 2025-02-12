@@ -1,0 +1,126 @@
+import os
+import speech_recognition as sr
+from deep_translator import GoogleTranslator
+from docx import Document
+from pydub import AudioSegment
+
+# Initialize recognizer
+recognizer = sr.Recognizer()
+
+# Function to convert MP3 to WAV
+def convert_to_wav(audio_path):
+    try:
+        audio = AudioSegment.from_file(audio_path)
+        wav_path = audio_path.rsplit(".", 1)[0] + "_temp.wav"
+        audio.export(wav_path, format="wav")
+        print(f"Converted {audio_path} to {wav_path}")
+        return wav_path
+    except Exception as e:
+        print(f"Error converting {audio_path} to WAV: {e}")
+        return None
+
+# Function to split audio into smaller chunks
+def split_audio_to_chunks(audio_path, chunk_length_ms=30000):  # Default: 30 seconds
+    try:
+        audio = AudioSegment.from_wav(audio_path)
+        chunks = [audio[i:i + chunk_length_ms] for i in range(0, len(audio), chunk_length_ms)]
+        return chunks
+    except Exception as e:
+        print(f"Error splitting audio {audio_path}: {e}")
+        return None
+
+# Function to transcribe an audio chunk
+def transcribe_audio_chunk(chunk, recognizer):
+    try:
+        with sr.AudioFile(chunk) as source:
+            audio_data = recognizer.record(source)
+            return recognizer.recognize_google(audio_data, show_all=False)
+    except sr.UnknownValueError:
+        return ""
+    except Exception as e:
+        print(f"Error transcribing chunk: {e}")
+        return ""
+
+# Function to translate text to English using deep-translator
+def translate_text_to_english(text):
+    try:
+        translated = GoogleTranslator(source="auto", target="en").translate(text)
+        return translated
+    except Exception as e:
+        print(f"Error translating text: {e}")
+        return text
+
+# Function to save original and translated text to a Word file
+def save_to_word_file(original_text, translated_text, output_file):
+    try:
+        doc = Document()
+        doc.add_heading("Original Content (Source Language):", level=2)
+        doc.add_paragraph(original_text)
+        doc.add_heading("Translated Content (English):", level=2)
+        doc.add_paragraph(translated_text)
+        doc.save(output_file)
+        print(f"Original and translated text saved to: {output_file}")
+    except Exception as e:
+        print(f"Error saving to Word file: {e}")
+
+# Main function to process a single MP3 file
+def process_audio_file(audio_file, output_folder):
+    try:
+        # Convert to WAV
+        wav_path = convert_to_wav(audio_file)
+        if not wav_path:
+            print(f"Skipping file due to conversion error: {audio_file}")
+            return
+
+        # Split into chunks
+        chunks = split_audio_to_chunks(wav_path)
+        if not chunks:
+            print(f"Skipping file due to chunking error: {audio_file}")
+            return
+
+        # Transcribe and translate each chunk
+        full_original_transcription = []
+        for idx, chunk in enumerate(chunks):
+            print(f"Processing chunk {idx + 1}/{len(chunks)}...")
+            
+            # Save chunk to a temporary file for transcription
+            temp_chunk_path = wav_path.rsplit(".", 1)[0] + f"_chunk{idx}.wav"
+            chunk.export(temp_chunk_path, format="wav")
+            
+            # Transcribe chunk
+            chunk_text = transcribe_audio_chunk(temp_chunk_path, recognizer)
+            os.remove(temp_chunk_path)  # Clean up temporary chunk file
+            
+            # Add chunk text to full transcription
+            if chunk_text:
+                full_original_transcription.append(chunk_text)
+
+        # Combine original transcribed text
+        combined_original_text = " ".join(full_original_transcription)
+
+        # Translate the combined text to English
+        print("Translating content to English...")
+        translated_text = translate_text_to_english(combined_original_text)
+
+        # Save both original and translated text to a Word file
+        base_name = os.path.basename(audio_file).rsplit(".", 1)[0]
+        output_file = os.path.join(output_folder, f"{base_name}_translated.docx")
+        save_to_word_file(combined_original_text, translated_text, output_file)
+
+        # Clean up temporary WAV file
+        os.remove(wav_path)
+
+    except Exception as e:
+        print(f"Error processing file {audio_file}: {e}")
+
+# Example usage
+if __name__ == "__main__":
+    # Path to the single MP3 file
+    audio_file = "D:/Learning/Python/audio1.mp3"
+    output_folder = "D:/Learning/Python/Output"
+
+    # Create output folder if it doesn't exist
+    os.makedirs(output_folder, exist_ok=True)
+
+    # Process the audio file
+    process_audio_file(audio_file, output_folder)
